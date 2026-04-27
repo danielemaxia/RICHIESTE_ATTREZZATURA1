@@ -18850,26 +18850,28 @@ function buildRequestRows() {
 }
 
 
-
 function buildDatiRows() {
-  const tbody = document.querySelector('#tab-dati tbody');
+  const tbody = document.getElementById('datiBody');
+  if (!tbody) return;
+
   tbody.innerHTML = '';
 
-  if (!items || items.length === 0) return;
-
-  items.forEach(item => {
-    if (!item.descrizione) return;
-
+  items.forEach((item, index) => {
     const tr = document.createElement('tr');
+    tr.dataset.index = index;
 
     tr.innerHTML = `
-      <td>${item.descrizione}</td>
-      <td>${item.codice || ''}</td>
-      <td>${item.peso || ''}</td>
+      <td>${index + 1}</td>
+      <td><input data-field="descrizione" data-index="${index}" value="${item.descrizione || ''}"></td>
+      <td><input data-field="codice" data-index="${index}" value="${item.codice || ''}"></td>
+      <td><input data-field="peso" data-index="${index}" value="${item.peso || ''}" inputmode="decimal" placeholder="0,00"></td>
     `;
 
     tbody.appendChild(tr);
   });
+
+  bindDatiInputs();
+  applyDatiSearch();
 }
 
     const sanitizePeso = (value) => {
