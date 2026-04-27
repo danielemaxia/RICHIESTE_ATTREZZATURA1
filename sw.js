@@ -1,4 +1,4 @@
-const CACHE_NAME = 'richiesta-attrezzature-reset-20260427-1100';
+const CACHE_NAME = 'richiesta-attrezzature-nuovi-articoli-20260427-1200';
 
 const FILES_TO_CACHE = [
   './',
@@ -16,7 +16,7 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
       return Promise.allSettled(
-        FILES_TO_CACHE.map(file => cache.add(file))
+        FILES_TO_CACHE.map(file => cache.add(file + '?v=20260427-1200'))
       );
     })
   );
@@ -41,22 +41,43 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(event.request.url);
 
-  // Non toccare richieste esterne
   if (url.origin !== self.location.origin) return;
 
-  // Non toccare API, query di ricerca o URL con parametri
+  // MAI cache per ricerche o richieste con parametri
   if (url.search) return;
 
-  // Per le pagine: prova internet, poi index offline
-  if (event.request.mode === 'navigate') {
+  // HTML sempre dalla rete, cache solo se offline
+  if (
+    event.request.mode === 'navigate' ||
+    url.pathname.endsWith('/') ||
+    url.pathname.endsWith('/index.html')
+  ) {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match('./index.html'))
+      fetch(event.request, { cache: 'no-store' })
+        .then(response => response)
+        .catch(() => caches.match('./index.html'))
     );
     return;
   }
 
-  // Per file statici: prova internet, poi cache
+  // JS, CSS, JSON: sempre dalla rete, fallback cache se offline
+  if (
+    url.pathname.endsWith('.js') ||
+    url.pathname.endsWith('.css') ||
+    url.pathname.endsWith('.json')
+  ) {
+    event.respondWith(
+      fetch(event.request, { cache: 'no-store' })
+        .then(response => response)
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Immagini e icone: cache ok
   event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request))
+    caches.match(event.request).then(cached => {
+      return cached || fetch(event.request);
+    })
   );
 });
