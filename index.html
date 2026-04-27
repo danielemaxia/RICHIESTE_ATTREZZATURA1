@@ -18852,25 +18852,25 @@ function buildRequestRows() {
 
 
 function buildDatiRows() {
-  const body = document.getElementById('datiBody');
-  if (!body) return;
-  body.innerHTML = '';
+  const tbody = document.querySelector('#tab-dati tbody');
+  tbody.innerHTML = '';
 
-  items.forEach((raw, idx) => {
-    const row = normalizeItem(raw);
-    items[idx] = row;
+  if (!items || items.length === 0) return;
+
+  items.forEach(item => {
+    if (!item.descrizione) return;
 
     const tr = document.createElement('tr');
-    tr.dataset.index = String(idx);
 
-    const tdIdx = document.createElement('td');
-    tdIdx.textContent = idx + 1;
-    tr.appendChild(tdIdx);
+    tr.innerHTML = `
+      <td>${item.descrizione}</td>
+      <td>${item.codice || ''}</td>
+      <td>${item.peso || ''}</td>
+    `;
 
-    const isCompleteRow = () => {
-      const current = items[idx] || { descrizione:'', codice:'', peso:'' };
-      return !!String(current.descrizione || '').trim();
-    };
+    tbody.appendChild(tr);
+  });
+}
 
     const sanitizePeso = (value) => {
       let v = String(value ?? '').replace(/\./g, ',');
