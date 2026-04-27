@@ -452,10 +452,25 @@ table {
 <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png">
 <script>
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function () {
-    navigator.serviceWorker.register('./sw.js').catch(function(err) {
-      console.log('Service Worker non registrato:', err);
-    });
+  window.addEventListener('load', async () => {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+
+      for (const registration of registrations) {
+        await registration.unregister();
+      }
+
+      if ('caches' in window) {
+        const cacheNames = await caches.keys();
+        await Promise.all(cacheNames.map(cacheName => caches.delete(cacheName)));
+      }
+
+      await navigator.serviceWorker.register('./service-worker.js?v=20260427-1700');
+
+      console.log('Service worker reinstallato e cache cancellata');
+    } catch (error) {
+      console.error('Errore aggiornamento service worker:', error);
+    }
   });
 }
 </script>
