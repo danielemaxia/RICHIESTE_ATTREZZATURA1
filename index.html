@@ -1099,11 +1099,24 @@ const STORAGE_KEY = "richiesta_attrezzature_template_v1";
 
 let EMBEDDED_STATE = null;
 
+function formatPeso(value) {
+  if (value === null || value === undefined || value === '') return '';
+
+  const num = Number(String(value).replace(',', '.'));
+
+  if (isNaN(num)) return value;
+
+  return num.toLocaleString('it-IT', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  });
+}
+
 function normalizeItem(item) {
   return {
     descrizione: String(item?.descrizione ?? '').trim(),
     codice: String(item?.codice ?? '').trim(),
-    peso: String(item?.peso ?? '').trim()
+    peso: formatPeso(String(item?.peso ?? '').trim())
   };
 }
 
