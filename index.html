@@ -1278,6 +1278,7 @@ function addNewDatiRow() {
 
 function exportUpdatedHtml() {
   try {
+    aggiornaItemsDaDatiLive();
     saveItemsToStorage();
     saveState();
 
@@ -18905,12 +18906,64 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+function normalizeTextForSearch(value) {
+  return String(value || '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+}
+
+function getLiveItemsForRichiesta() {
+  const liveItems = [];
+
+  document.querySelectorAll('#datiBody tr').forEach(tr => {
+    const d = tr.querySelector('input[data-field="descrizione"]');
+    const c = tr.querySelector('input[data-field="codice"]');
+    const p = tr.querySelector('input[data-field="peso"]');
+
+    if (!d) return;
+
+    const item = normalizeItem({
+      descrizione: d.value || d.getAttribute('value') || '',
+      codice: c ? (c.value || c.getAttribute('value') || '') : '',
+      peso: p ? (p.value || p.getAttribute('value') || '') : ''
+    });
+
+    if (item.descrizione || item.codice || item.peso) {
+      liveItems.push(item);
+    }
+  });
+
+  if (liveItems.length) return liveItems;
+
+  return items.map(normalizeItem).filter(it => it.descrizione || it.codice || it.peso);
+}
+
+function aggiornaItemsDaDatiLive() {
+  const liveItems = getLiveItemsForRichiesta();
+  if (!liveItems.length) return;
+
+  items.length = 0;
+  liveItems.forEach(it => items.push(normalizeItem(it)));
+  sortItemsInPlace();
+  saveItemsToStorage();
+}
+
 function matchItems(query) {
-  const q = query.trim().toLowerCase();
+  const q = normalizeTextForSearch(query);
   if (!q) return [];
-  return items
-    .filter(x => x.descrizione && x.descrizione.toLowerCase().startsWith(q))
-    .slice(0, 30);
+
+  const source = getLiveItemsForRichiesta();
+
+  return source
+    .filter(x => {
+      const desc = normalizeTextForSearch(x.descrizione);
+      return desc.startsWith(q) || desc.includes(q);
+    })
+    .slice(0, 50);
 }
 function buildRequestRows() {
   const tbody = document.getElementById('requestRows');
@@ -18995,7 +19048,7 @@ function buildDatiRows() {
         }
         items[idx][field] = newValue;
         saveItemsToStorage();
-        refreshRichiestaFromDati();
+        aggiornaItemsDaDatiLive();
       });
 
       const commitCurrentValue = () => {
@@ -19006,7 +19059,7 @@ function buildDatiRows() {
         }
         items[idx][field] = newValue;
         saveItemsToStorage();
-        refreshRichiestaFromDati();
+        aggiornaItemsDaDatiLive();
       };
 
       const focusSameRowField = (nextField) => {
@@ -19081,7 +19134,18 @@ function syncFooterLocationLabels(source='top') {
 }
 
 function findItemByDescription(desc) {
-  return items.find(x => x.descrizione === desc) || null;
+  const wanted = normalizeTextForSearch(desc);
+  if (!wanted) return null;
+
+  const source = getLiveItemsForRichiesta();
+
+  let found = source.find(x => normalizeTextForSearch(x.descrizione) === wanted);
+  if (found) return found;
+
+  found = source.find(x => normalizeTextForSearch(x.descrizione).startsWith(wanted));
+  if (found) return found;
+
+  return source.find(x => normalizeTextForSearch(x.descrizione).includes(wanted)) || null;
 }
 function updateRow(rowNo) {
   const row = document.querySelector(`tr[data-row="${rowNo}"]`);
@@ -19137,7 +19201,7 @@ function attachAutocomplete(input) {
       return;
     }
     box.innerHTML = found.map((item, idx) => `
-      <div class="suggest-item ${idx===0?'active':''}" data-desc="${escapeHtml(item.descrizione)}">
+      <div class="suggest-item ${idx===0?'active':''}" data-desc="${escapeHtml(item.descrizione)}" data-code="${escapeHtml(item.codice)}" data-peso="${escapeHtml(item.peso)}">
         <strong>${escapeHtml(item.descrizione)}</strong><br>
         <span class="muted">Codice: ${escapeHtml(item.codice)} - Peso: ${escapeHtml(item.peso)}</span>
       </div>`).join('');
@@ -19147,6 +19211,11 @@ function attachAutocomplete(input) {
       el.addEventListener('mousedown', (e) => {
         e.preventDefault();
         input.value = el.dataset.desc;
+        const row = document.querySelector(`tr[data-row="${rowNo}"]`);
+        if (row) {
+          row.querySelector('.code').value = el.dataset.code || '';
+          row.querySelector('.peso').value = el.dataset.peso || '';
+        }
         box.style.display = 'none';
         updateRow(rowNo);
       });
@@ -19757,6 +19826,7 @@ try {
 } catch(e) {}
 syncItemsFromDatiTable();
 buildDatiRows();
+aggiornaItemsDaDatiLive();
 refreshRichiestaFromDati();
 setTodayFields();
 loadState();
