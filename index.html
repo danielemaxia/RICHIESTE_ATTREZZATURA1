@@ -1280,6 +1280,7 @@ function addNewDatiRow() {
 
 
 function exportUpdatedHtml() {
+    rebuildItemsFromDatiAndItems();
   try {
     saveItemsToStorage();
     saveState();
@@ -19023,22 +19024,76 @@ function getAllArticlesForRichiesta() {
   );
 }
 
-function matchItems(query) {
-  const q = String(query || '')
+
+function normSearchText(value) {
+  return String(value || '')
     .trim()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .toUpperCase();
+}
 
+function getArticlesForRichiestaFromEverywhere() {
+  const map = new Map();
+
+  function addArticle(raw) {
+    const it = normalizeItem(raw || {});
+    const key = normSearchText(it.descrizione);
+    if (!key) return;
+    map.set(key, it);
+  }
+
+  if (Array.isArray(items)) {
+    items.forEach(addArticle);
+  }
+
+  document.querySelectorAll('#datiBody tr').forEach(tr => {
+    const d = tr.querySelector('input[data-field="descrizione"]');
+    const c = tr.querySelector('input[data-field="codice"]');
+    const p = tr.querySelector('input[data-field="peso"]');
+
+    if (!d) return;
+
+    addArticle({
+      descrizione: d.value || d.getAttribute('value') || '',
+      codice: c ? (c.value || c.getAttribute('value') || '') : '',
+      peso: p ? (p.value || p.getAttribute('value') || '') : ''
+    });
+  });
+
+  return Array.from(map.values()).sort((a, b) =>
+    normSearchText(a.descrizione).localeCompare(normSearchText(b.descrizione), 'it')
+  );
+}
+
+function rebuildItemsFromDatiAndItems() {
+  const all = getArticlesForRichiestaFromEverywhere();
+
+  items.length = 0;
+  all.forEach(it => items.push(normalizeItem(it)));
+
+  while (items.length < MAX_ITEMS) {
+    items.push({ descrizione: '', codice: '', peso: '' });
+  }
+
+  if (items.length > MAX_ITEMS) {
+    items.length = MAX_ITEMS;
+  }
+
+  saveItemsToStorage();
+}
+
+function matchItems(query) {
+  const q = normSearchText(query);
   if (!q) return [];
 
-  return getAllArticlesForRichiesta()
-    .filter(x => {
-      const desc = itemSortKey(x);
-      return desc.startsWith(q) || desc.includes(q);
+  return getArticlesForRichiestaFromEverywhere()
+    .filter(item => {
+      const d = normSearchText(item.descrizione);
+      return d.startsWith(q) || d.includes(q);
     })
-    .slice(0, 80);
+    .slice(0, 100);
 }
 function buildRequestRows() {
   const tbody = document.getElementById('requestRows');
@@ -19207,24 +19262,17 @@ function syncFooterLocationLabels(source='top') {
 }
 
 function findItemByDescription(desc) {
-  const wanted = String(desc || '')
-    .trim()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, ' ')
-    .toUpperCase();
+  const q = normSearchText(desc);
+  if (!q) return null;
 
-  if (!wanted) return null;
+  const all = getArticlesForRichiestaFromEverywhere();
 
-  const source = getAllArticlesForRichiesta();
-
-  let found = source.find(x => itemSortKey(x) === wanted);
-  if (found) return found;
-
-  found = source.find(x => itemSortKey(x).startsWith(wanted));
-  if (found) return found;
-
-  return source.find(x => itemSortKey(x).includes(wanted)) || null;
+  return (
+    all.find(item => normSearchText(item.descrizione) === q) ||
+    all.find(item => normSearchText(item.descrizione).startsWith(q)) ||
+    all.find(item => normSearchText(item.descrizione).includes(q)) ||
+    null
+  );
 }
 function updateRow(rowNo) {
   const row = document.querySelector(`tr[data-row="${rowNo}"]`);
@@ -20042,5 +20090,26 @@ document.addEventListener('blur', function(e){
     }
   }
 }, true);
+
+
+document.addEventListener('DOMContentLoaded', function () {
+  rebuildItemsFromDatiAndItems();
+
+  document.querySelectorAll('.tab[data-tab="richiesta"]').forEach(tab => {
+    tab.addEventListener('click', function () {
+      rebuildItemsFromDatiAndItems();
+    });
+  });
+
+  document.querySelectorAll('#requestRows .desc').forEach(el => {
+    el.addEventListener('focus', function () {
+      rebuildItemsFromDatiAndItems();
+    });
+    el.addEventListener('input', function () {
+      rebuildItemsFromDatiAndItems();
+    });
+  });
+});
+
 </script>
 </body></html>
