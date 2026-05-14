@@ -1196,7 +1196,7 @@ function syncItemsFromDatiTable() {
 }
 
 function refreshRichiestaFromDati() {
-  syncItemsFromDatiTable();
+  mergeEmbeddedDatiIntoItems();
   document.querySelectorAll('#requestRows tr').forEach(tr => {
     if (typeof updateRow === 'function') updateRow(tr.dataset.row);
   });
@@ -1284,7 +1284,8 @@ function exportUpdatedHtml() {
     saveItemsToStorage();
     saveState();
 
-    const exportItems = items.map(normalizeItem);
+    mergeEmbeddedDatiIntoItems();
+    const exportItems = getAllArticlesForRichiesta();
     exportItems.sort((a, b) => {
       const aBlank = !a.descrizione && !a.codice && !a.peso;
       const bBlank = !b.descrizione && !b.codice && !b.peso;
@@ -1310,7 +1311,11 @@ function exportUpdatedHtml() {
     });
 
     // usa l'elenco completo aggiornato, non solo le righe visibili del DOM
-    const finalItems = items.map(normalizeItem);
+    const finalItems = getAllArticlesForRichiesta();
+    while (finalItems.length < MAX_ITEMS) {
+      finalItems.push({ descrizione: '', codice: '', peso: '' });
+    }
+    if (finalItems.length > MAX_ITEMS) finalItems.length = MAX_ITEMS;
     finalItems.sort((a, b) => {
       const aBlank = !a.descrizione && !a.codice && !a.peso;
       const bBlank = !b.descrizione && !b.codice && !b.peso;
@@ -18923,29 +18928,117 @@ function normalizeTextForSearch(value) {
     .toUpperCase();
 }
 
-function getItemsForRichiesta() {
-  return items
-    .map(normalizeItem)
-    .filter(it => it.descrizione || it.codice || it.peso);
+
+
+
+function readEmbeddedDatiRowsBeforeRender() {
+  const rows = Array.from(document.querySelectorAll('#datiBody tr'));
+  const result = [];
+
+  rows.forEach(tr => {
+    const d = tr.querySelector('input[data-field="descrizione"]');
+    const c = tr.querySelector('input[data-field="codice"]');
+    const p = tr.querySelector('input[data-field="peso"]');
+
+    if (!d) return;
+
+    const item = normalizeItem({
+      descrizione: d.value || d.getAttribute('value') || '',
+      codice: c ? (c.value || c.getAttribute('value') || '') : '',
+      peso: p ? (p.value || p.getAttribute('value') || '') : ''
+    });
+
+    if (item.descrizione || item.codice || item.peso) {
+      result.push(item);
+    }
+  });
+
+  return result;
 }
 
-function aggiornaItemsDaDatiLive() {
-  // Compatibilità con versioni precedenti: non riordina mentre si scrive.
+function mergeEmbeddedDatiIntoItems() {
+  const embeddedRows = readEmbeddedDatiRowsBeforeRender();
+  if (!embeddedRows.length) return;
+
+  const byDescription = new Map();
+
+  items.forEach(raw => {
+    const it = normalizeItem(raw);
+    if (it.descrizione || it.codice || it.peso) {
+      byDescription.set(itemSortKey(it), it);
+    }
+  });
+
+  embeddedRows.forEach(raw => {
+    const it = normalizeItem(raw);
+    if (it.descrizione || it.codice || it.peso) {
+      byDescription.set(itemSortKey(it), it);
+    }
+  });
+
+  items.length = 0;
+  Array.from(byDescription.values()).forEach(it => items.push(it));
+
+  while (items.length < MAX_ITEMS) {
+    items.push({ descrizione: '', codice: '', peso: '' });
+  }
+
+  if (items.length > MAX_ITEMS) {
+    items.length = MAX_ITEMS;
+  }
+
+  sortItemsInPlace();
   saveItemsToStorage();
 }
 
+function getAllArticlesForRichiesta() {
+  const byDescription = new Map();
+
+  items.forEach(raw => {
+    const it = normalizeItem(raw);
+    if (it.descrizione || it.codice || it.peso) {
+      byDescription.set(itemSortKey(it), it);
+    }
+  });
+
+  document.querySelectorAll('#datiBody tr').forEach(tr => {
+    const d = tr.querySelector('input[data-field="descrizione"]');
+    const c = tr.querySelector('input[data-field="codice"]');
+    const p = tr.querySelector('input[data-field="peso"]');
+    if (!d) return;
+
+    const it = normalizeItem({
+      descrizione: d.value || d.getAttribute('value') || '',
+      codice: c ? (c.value || c.getAttribute('value') || '') : '',
+      peso: p ? (p.value || p.getAttribute('value') || '') : ''
+    });
+
+    if (it.descrizione || it.codice || it.peso) {
+      byDescription.set(itemSortKey(it), it);
+    }
+  });
+
+  return Array.from(byDescription.values()).sort((a, b) =>
+    itemSortKey(a).localeCompare(itemSortKey(b), 'it', { sensitivity: 'base' })
+  );
+}
+
 function matchItems(query) {
-  const q = normalizeTextForSearch(query);
+  const q = String(query || '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+
   if (!q) return [];
 
-  const source = getItemsForRichiesta();
-
-  return source
+  return getAllArticlesForRichiesta()
     .filter(x => {
-      const desc = normalizeTextForSearch(x.descrizione);
+      const desc = itemSortKey(x);
       return desc.startsWith(q) || desc.includes(q);
     })
-    .slice(0, 50);
+    .slice(0, 80);
 }
 function buildRequestRows() {
   const tbody = document.getElementById('requestRows');
@@ -19114,18 +19207,24 @@ function syncFooterLocationLabels(source='top') {
 }
 
 function findItemByDescription(desc) {
-  const wanted = normalizeTextForSearch(desc);
+  const wanted = String(desc || '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+
   if (!wanted) return null;
 
-  const source = getItemsForRichiesta();
+  const source = getAllArticlesForRichiesta();
 
-  let found = source.find(x => normalizeTextForSearch(x.descrizione) === wanted);
+  let found = source.find(x => itemSortKey(x) === wanted);
   if (found) return found;
 
-  found = source.find(x => normalizeTextForSearch(x.descrizione).startsWith(wanted));
+  found = source.find(x => itemSortKey(x).startsWith(wanted));
   if (found) return found;
 
-  return source.find(x => normalizeTextForSearch(x.descrizione).includes(wanted)) || null;
+  return source.find(x => itemSortKey(x).includes(wanted)) || null;
 }
 function updateRow(rowNo) {
   const row = document.querySelector(`tr[data-row="${rowNo}"]`);
@@ -19814,15 +19913,15 @@ function saveStateDebounced() {
   saveTimer = setTimeout(saveState, 500);
 }
 buildRequestRows();
-// Usa sempre l'elenco completo incorporato nel file index.html.
-// Questo evita che DATI e RICHIESTA leggano due database diversi.
+// All'avvio fonde SEMPRE gli articoli presenti nella tabella DATI HTML dentro il database usato dalla RICHIESTA.
 try {
   localStorage.removeItem('richiestaAttrezzatureItems');
   localStorage.removeItem('items');
   localStorage.removeItem('dati');
 } catch(e) {}
-sortItemsInPlace();
-saveItemsToStorage();
+
+mergeEmbeddedDatiIntoItems();
+console.log('Articoli disponibili per RICHIESTA:', getAllArticlesForRichiesta().length);
 buildDatiRows();
 document.querySelectorAll('#requestRows tr').forEach(tr => {
   if (typeof updateRow === 'function') updateRow(tr.dataset.row);
