@@ -1232,6 +1232,7 @@ function persistItemsAndRefresh() {
   sortItemsInPlace();
   saveItemsToStorage();
   buildDatiRows();
+updateDatiCountLabel();
   applyDatiSearchFilter();
   document.querySelectorAll('#requestRows tr').forEach(tr => {
     if (typeof updateRow === 'function') updateRow(tr.dataset.row);
@@ -1295,6 +1296,7 @@ function addNewDatiRow() {
 
 
 function exportUpdatedHtml() {
+    syncAllArticlesBeforeRender();
     rebuildItemsFromDatiAndItems();
   try {
     saveItemsToStorage();
@@ -19100,6 +19102,7 @@ function rebuildItemsFromDatiAndItems() {
 }
 
 function matchItems(query) {
+  syncAllArticlesBeforeRender();
   const q = normSearchText(query);
   if (!q) return [];
 
@@ -19137,7 +19140,103 @@ function buildRequestRows() {
 
 
 
+
+function __normArticleKey(value) {
+  return String(value || '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+}
+
+function __readDatiRowsFromHtml() {
+  const result = [];
+
+  document.querySelectorAll('#datiBody tr').forEach(tr => {
+    const d = tr.querySelector('input[data-field="descrizione"]');
+    const c = tr.querySelector('input[data-field="codice"]');
+    const p = tr.querySelector('input[data-field="peso"]');
+
+    if (!d) return;
+
+    const item = normalizeItem({
+      descrizione: d.value || d.getAttribute('value') || '',
+      codice: c ? (c.value || c.getAttribute('value') || '') : '',
+      peso: p ? (p.value || p.getAttribute('value') || '') : ''
+    });
+
+    if (item.descrizione || item.codice || item.peso) {
+      result.push(item);
+    }
+  });
+
+  return result;
+}
+
+function syncAllArticlesBeforeRender() {
+  const map = new Map();
+
+  function add(raw) {
+    const it = normalizeItem(raw || {});
+    const key = __normArticleKey(it.descrizione);
+    if (!key) return;
+
+    // Se esiste già, conserva codice/peso più completi
+    const old = map.get(key);
+    if (!old) {
+      map.set(key, it);
+    } else {
+      map.set(key, {
+        descrizione: it.descrizione || old.descrizione,
+        codice: it.codice || old.codice,
+        peso: it.peso || old.peso
+      });
+    }
+  }
+
+  if (Array.isArray(items)) {
+    items.forEach(add);
+  }
+
+  __readDatiRowsFromHtml().forEach(add);
+
+  const all = Array.from(map.values()).sort((a, b) =>
+    __normArticleKey(a.descrizione).localeCompare(__normArticleKey(b.descrizione), 'it')
+  );
+
+  items.length = 0;
+  all.forEach(it => items.push(normalizeItem(it)));
+
+  while (items.length < MAX_ITEMS) {
+    items.push({ descrizione: '', codice: '', peso: '' });
+  }
+
+  if (items.length > MAX_ITEMS) {
+    items.length = MAX_ITEMS;
+  }
+
+  saveItemsToStorage();
+  return all.length;
+}
+
+
+function updateDatiCountLabel() {
+  const label = document.querySelector('#panel-dati .dati-tools .muted');
+  if (!label) return;
+  const count = items.filter(it => {
+    const x = normalizeItem(it);
+    return x.descrizione || x.codice || x.peso;
+  }).length;
+  label.textContent = '- articoli caricati: ' + count + ' / ' + MAX_ITEMS + ' posti disponibili';
+}
+
 function buildDatiRows() {
+  if (!window.__buildingDatiRows) {
+    window.__buildingDatiRows = true;
+    syncAllArticlesBeforeRender();
+    window.__buildingDatiRows = false;
+  }
   const body = document.getElementById('datiBody');
   if (!body) return;
   body.innerHTML = '';
@@ -19277,6 +19376,7 @@ function syncFooterLocationLabels(source='top') {
 }
 
 function findItemByDescription(desc) {
+  syncAllArticlesBeforeRender();
   const q = normSearchText(desc);
   if (!q) return null;
 
@@ -20124,6 +20224,14 @@ document.addEventListener('DOMContentLoaded', function () {
       rebuildItemsFromDatiAndItems();
     });
   });
+});
+
+
+
+document.addEventListener('DOMContentLoaded', function () {
+  syncAllArticlesBeforeRender();
+  buildDatiRows();
+  updateDatiCountLabel();
 });
 
 </script>
