@@ -1233,6 +1233,9 @@ function persistItemsAndRefresh() {
   saveItemsToStorage();
   buildDatiRows();
   applyDatiSearchFilter();
+  document.querySelectorAll('#requestRows tr').forEach(tr => {
+    if (typeof updateRow === 'function') updateRow(tr.dataset.row);
+  });
 }
 
 
@@ -1278,7 +1281,6 @@ function addNewDatiRow() {
 
 function exportUpdatedHtml() {
   try {
-    aggiornaItemsDaDatiLive();
     saveItemsToStorage();
     saveState();
 
@@ -1307,14 +1309,7 @@ function exportUpdatedHtml() {
       return 0;
     });
 
-    // forza il passaggio dai campi DATI alla lista JS usata dalla RICHIESTA
-    syncItemsFromDatiTable();
-
-    // scrive anche i value negli attributi HTML, così DATI e RICHIESTA restano allineati
-    document.querySelectorAll('#datiBody input').forEach(inp => {
-      inp.setAttribute('value', inp.value || '');
-    });
-
+    // usa l'elenco completo aggiornato, non solo le righe visibili del DOM
     const finalItems = items.map(normalizeItem);
     finalItems.sort((a, b) => {
       const aBlank = !a.descrizione && !a.codice && !a.peso;
@@ -1323,6 +1318,18 @@ function exportUpdatedHtml() {
       if (!aBlank && bBlank) return -1;
       if (aBlank && bBlank) return 0;
       return itemSortKey(a).localeCompare(itemSortKey(b), 'it', { sensitivity: 'base' });
+    });
+
+
+    document.querySelectorAll('#datiBody tr').forEach(tr => {
+      const idx = Number(tr.dataset.index);
+      const it = normalizeItem(items[idx] || {});
+      const d = tr.querySelector('input[data-field="descrizione"]');
+      const c = tr.querySelector('input[data-field="codice"]');
+      const p = tr.querySelector('input[data-field="peso"]');
+      if (d) d.setAttribute('value', it.descrizione || '');
+      if (c) c.setAttribute('value', it.codice || '');
+      if (p) p.setAttribute('value', it.peso || '');
     });
 
     let exported = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
@@ -18916,39 +18923,14 @@ function normalizeTextForSearch(value) {
     .toUpperCase();
 }
 
-function getLiveItemsForRichiesta() {
-  const liveItems = [];
-
-  document.querySelectorAll('#datiBody tr').forEach(tr => {
-    const d = tr.querySelector('input[data-field="descrizione"]');
-    const c = tr.querySelector('input[data-field="codice"]');
-    const p = tr.querySelector('input[data-field="peso"]');
-
-    if (!d) return;
-
-    const item = normalizeItem({
-      descrizione: d.value || d.getAttribute('value') || '',
-      codice: c ? (c.value || c.getAttribute('value') || '') : '',
-      peso: p ? (p.value || p.getAttribute('value') || '') : ''
-    });
-
-    if (item.descrizione || item.codice || item.peso) {
-      liveItems.push(item);
-    }
-  });
-
-  if (liveItems.length) return liveItems;
-
-  return items.map(normalizeItem).filter(it => it.descrizione || it.codice || it.peso);
+function getItemsForRichiesta() {
+  return items
+    .map(normalizeItem)
+    .filter(it => it.descrizione || it.codice || it.peso);
 }
 
 function aggiornaItemsDaDatiLive() {
-  const liveItems = getLiveItemsForRichiesta();
-  if (!liveItems.length) return;
-
-  items.length = 0;
-  liveItems.forEach(it => items.push(normalizeItem(it)));
-  sortItemsInPlace();
+  // Compatibilità con versioni precedenti: non riordina mentre si scrive.
   saveItemsToStorage();
 }
 
@@ -18956,7 +18938,7 @@ function matchItems(query) {
   const q = normalizeTextForSearch(query);
   if (!q) return [];
 
-  const source = getLiveItemsForRichiesta();
+  const source = getItemsForRichiesta();
 
   return source
     .filter(x => {
@@ -19048,7 +19030,6 @@ function buildDatiRows() {
         }
         items[idx][field] = newValue;
         saveItemsToStorage();
-        aggiornaItemsDaDatiLive();
       });
 
       const commitCurrentValue = () => {
@@ -19059,7 +19040,6 @@ function buildDatiRows() {
         }
         items[idx][field] = newValue;
         saveItemsToStorage();
-        aggiornaItemsDaDatiLive();
       };
 
       const focusSameRowField = (nextField) => {
@@ -19137,7 +19117,7 @@ function findItemByDescription(desc) {
   const wanted = normalizeTextForSearch(desc);
   if (!wanted) return null;
 
-  const source = getLiveItemsForRichiesta();
+  const source = getItemsForRichiesta();
 
   let found = source.find(x => normalizeTextForSearch(x.descrizione) === wanted);
   if (found) return found;
@@ -19244,6 +19224,11 @@ function attachAutocomplete(input) {
       e.preventDefault();
       if (activeIndex >= 0 && itemsEls[activeIndex]) {
         input.value = itemsEls[activeIndex].dataset.desc;
+        const row = document.querySelector(`tr[data-row="${rowNo}"]`);
+        if (row) {
+          row.querySelector('.code').value = itemsEls[activeIndex].dataset.code || '';
+          row.querySelector('.peso').value = itemsEls[activeIndex].dataset.peso || '';
+        }
         box.style.display = 'none';
         updateRow(rowNo);
       }
@@ -19572,6 +19557,18 @@ function generateCompiledHTML() {
       return;
     }
 
+
+    document.querySelectorAll('#datiBody tr').forEach(tr => {
+      const idx = Number(tr.dataset.index);
+      const it = normalizeItem(items[idx] || {});
+      const d = tr.querySelector('input[data-field="descrizione"]');
+      const c = tr.querySelector('input[data-field="codice"]');
+      const p = tr.querySelector('input[data-field="peso"]');
+      if (d) d.setAttribute('value', it.descrizione || '');
+      if (c) c.setAttribute('value', it.codice || '');
+      if (p) p.setAttribute('value', it.peso || '');
+    });
+
     let exported = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
 
  // NON incorporare localStorage nell'HTML esportato
@@ -19817,17 +19814,19 @@ function saveStateDebounced() {
   saveTimer = setTimeout(saveState, 500);
 }
 buildRequestRows();
-// Prima legge gli articoli eventualmente presenti nella tabella DATI dell'HTML.
-// Poi ricostruisce DATI e RICHIESTA usando la stessa lista aggiornata.
+// Usa sempre l'elenco completo incorporato nel file index.html.
+// Questo evita che DATI e RICHIESTA leggano due database diversi.
 try {
   localStorage.removeItem('richiestaAttrezzatureItems');
   localStorage.removeItem('items');
   localStorage.removeItem('dati');
 } catch(e) {}
-syncItemsFromDatiTable();
+sortItemsInPlace();
+saveItemsToStorage();
 buildDatiRows();
-aggiornaItemsDaDatiLive();
-refreshRichiestaFromDati();
+document.querySelectorAll('#requestRows tr').forEach(tr => {
+  if (typeof updateRow === 'function') updateRow(tr.dataset.row);
+});
 setTodayFields();
 loadState();
 
