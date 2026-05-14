@@ -1245,31 +1245,46 @@ function addNewDatiRow() {
   const rows = Array.from(document.querySelectorAll('#datiBody tr'));
   if (!rows.length) return;
 
-  let targetIndex = -1;
-  for (let i = 0; i < items.length; i++) {
-    const it = normalizeItem(items[i]);
-    if (!it.descrizione && !it.codice && !it.peso) {
-      targetIndex = i;
-      break;
+  // Cerca l'ultima riga realmente compilata guardando la tabella DATI visibile,
+  // non l'array interno. In questo modo "Nuovo articolo" va sempre alla prima riga utile.
+  let lastFilledIndex = -1;
+
+  rows.forEach((tr, visualIndex) => {
+    const descrizione = tr.querySelector('input[data-field="descrizione"]')?.value?.trim() || '';
+    const codice = tr.querySelector('input[data-field="codice"]')?.value?.trim() || '';
+    const peso = tr.querySelector('input[data-field="peso"]')?.value?.trim() || '';
+
+    if (descrizione || codice || peso) {
+      lastFilledIndex = visualIndex;
     }
+  });
+
+  let targetRow = rows[lastFilledIndex + 1];
+
+  // Se per qualunque motivo non trova la riga successiva, cerca la prima vuota disponibile.
+  if (!targetRow) {
+    targetRow = rows.find(tr => {
+      const descrizione = tr.querySelector('input[data-field="descrizione"]')?.value?.trim() || '';
+      const codice = tr.querySelector('input[data-field="codice"]')?.value?.trim() || '';
+      const peso = tr.querySelector('input[data-field="peso"]')?.value?.trim() || '';
+      return !descrizione && !codice && !peso;
+    });
   }
 
-  if (targetIndex === -1) {
+  if (!targetRow) {
     alert('Non ci sono righe vuote disponibili nel foglio DATI.');
     return;
   }
-
-  const targetRow = document.querySelector('#datiBody tr[data-index="' + targetIndex + '"]');
-  if (!targetRow) return;
 
   document.querySelectorAll('#datiBody tr').forEach(tr => tr.classList.remove('dati-match-row'));
   targetRow.classList.add('dati-match-row');
 
   setTimeout(() => {
     if (scroller) {
-      const top = Math.max(0, targetRow.offsetTop - 20);
+      const top = Math.max(0, targetRow.offsetTop - 40);
       scroller.scrollTop = top;
     }
+
     const firstInput = targetRow.querySelector('input[data-field="descrizione"]');
     if (firstInput) {
       firstInput.focus();
