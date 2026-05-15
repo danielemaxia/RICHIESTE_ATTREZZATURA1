@@ -445,7 +445,7 @@ table {
   width: auto !important;
 }
 </style>
-<link href="./manifest.webmanifest?v=1001" rel="manifest">
+<link href="./manifest.webmanifest?v=1002" rel="manifest">
 <meta content="#ffffff" name="theme-color">
 <meta content="yes" name="mobile-web-app-capable">
 <meta content="Richiesta Attrezzature" name="apple-mobile-web-app-title">
@@ -455,34 +455,68 @@ table {
 <link href="./icon-512.png" rel="icon" sizes="512x512" type="image/png">
 <script>
 let deferredInstallPrompt = null;
+let installPromptReady = false;
+
+function isRunningAsInstalledApp() {
+  return window.matchMedia('(display-mode: standalone)').matches ||
+         window.matchMedia('(display-mode: fullscreen)').matches ||
+         window.navigator.standalone === true;
+}
+
+function setInstallButtonState(state) {
+  const btn = document.getElementById('installAppBtn');
+  if (!btn) return;
+
+  btn.style.display = 'inline-block';
+
+  if (state === 'installed') {
+    btn.disabled = true;
+    btn.textContent = '✅ App installata';
+    btn.title = 'App già installata';
+    btn.style.background = 'rgb(108, 117, 125)';
+    btn.style.borderColor = 'rgb(108, 117, 125)';
+    btn.style.color = '#fff';
+    return;
+  }
+
+  if (state === 'ready') {
+    btn.disabled = false;
+    btn.textContent = '📲 Installa app';
+    btn.title = 'Installa app';
+    btn.style.background = 'rgb(25, 135, 84)';
+    btn.style.borderColor = 'rgb(25, 135, 84)';
+    btn.style.color = '#fff';
+    return;
+  }
+
+  // Stato iniziale: non blocco il pulsante.
+  btn.disabled = false;
+  btn.textContent = '📲 Installa app';
+  btn.title = 'Installa app';
+  btn.style.background = 'rgb(25, 135, 84)';
+  btn.style.borderColor = 'rgb(25, 135, 84)';
+  btn.style.color = '#fff';
+}
 
 window.addEventListener('beforeinstallprompt', function (event) {
   event.preventDefault();
   deferredInstallPrompt = event;
-
-  const btn = document.getElementById('installAppBtn');
-  if (btn) {
-    btn.disabled = false;
-    btn.style.display = 'inline-block';
-    btn.textContent = '📲 Installa app';
-  }
+  installPromptReady = true;
+  setInstallButtonState('ready');
 });
 
 window.addEventListener('appinstalled', function () {
   deferredInstallPrompt = null;
-
-  const btn = document.getElementById('installAppBtn');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = '✅ App installata';
-  }
+  installPromptReady = false;
+  setInstallButtonState('installed');
 });
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('./sw.js')
-      .then(function () {
+    navigator.serviceWorker.register('./sw.js?v=1002')
+      .then(function (registration) {
         console.log('Service Worker registrato');
+        if (registration && registration.update) registration.update();
       })
       .catch(function (err) {
         console.log('Service Worker non registrato:', err);
@@ -492,32 +526,41 @@ if ('serviceWorker' in navigator) {
 
 document.addEventListener('DOMContentLoaded', function () {
   const btn = document.getElementById('installAppBtn');
-
   if (!btn) return;
 
-  // Stato iniziale corretto: il pulsante non parte come "App già installata".
-  // Diventa installata solo dopo il vero evento "appinstalled".
-  btn.disabled = false;
-  btn.style.display = 'inline-block';
-  if (!btn.textContent || btn.textContent.includes('già installata') || btn.textContent.includes('App installata')) {
-    btn.textContent = '📲 Installa app';
+  if (isRunningAsInstalledApp()) {
+    setInstallButtonState('installed');
+  } else {
+    setInstallButtonState('ready');
   }
 
   btn.addEventListener('click', async function () {
+    if (isRunningAsInstalledApp()) {
+      setInstallButtonState('installed');
+      return;
+    }
+
     if (!deferredInstallPrompt) {
-      alert('Installazione non ancora disponibile. Apri il sito da Chrome/Edge, attendi qualche secondo e riprova. Su iPhone usa Safari → Condividi → Aggiungi alla schermata Home.');
+      alert('Se il pulsante non avvia subito installazione: attendi qualche secondo e riprova. In alternativa usa Chrome/Edge menu ⋮ → Installa app. Su iPhone usa Safari → Condividi → Aggiungi alla schermata Home.');
       return;
     }
 
     deferredInstallPrompt.prompt();
 
     try {
-      await deferredInstallPrompt.userChoice;
+      const choice = await deferredInstallPrompt.userChoice;
+      if (choice && choice.outcome === 'accepted') {
+        setInstallButtonState('installed');
+      } else {
+        setInstallButtonState('ready');
+      }
     } catch (err) {
       console.log('Installazione annullata o non completata:', err);
+      setInstallButtonState('ready');
     }
 
     deferredInstallPrompt = null;
+    installPromptReady = false;
   });
 });
 </script>
@@ -20281,47 +20324,4 @@ document.addEventListener('DOMContentLoaded', function () {
 document.addEventListener('keydown', function(e) {
   const input = e.target;
   if (!input || !input.matches || !input.matches('#datiBody input[data-field="peso"]')) return;
-  if (e.key !== 'Enter') return;
-
-  e.preventDefault();
-  e.stopPropagation();
-  if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
-
-  const tr = input.closest('tr');
-  if (!tr) return;
-
-  const idx = Number(tr.dataset.index);
-  if (!Number.isFinite(idx) || !items[idx]) return;
-
-  const descInput = tr.querySelector('input[data-field="descrizione"]');
-  const codeInput = tr.querySelector('input[data-field="codice"]');
-  const pesoInput = tr.querySelector('input[data-field="peso"]');
-
-  let peso = pesoInput ? String(pesoInput.value || '') : '';
-  peso = peso.replace(/\./g, ',').replace(/[^0-9,]/g, '');
-  const parts = peso.split(',');
-  if (parts.length > 2) peso = parts[0] + ',' + parts.slice(1).join('');
-  const finalParts = peso.split(',');
-  if (finalParts[1] !== undefined) {
-    finalParts[1] = finalParts[1].slice(0, 2);
-    peso = finalParts[0] + ',' + finalParts[1];
-  }
-  if (pesoInput) pesoInput.value = peso;
-
-  items[idx] = normalizeItem({
-    descrizione: descInput ? descInput.value : items[idx].descrizione,
-    codice: codeInput ? codeInput.value : items[idx].codice,
-    peso: peso
-  });
-
-  saveItemsToStorage();
-
-  if (typeof persistItemsAndRefresh === 'function') {
-    persistItemsAndRefresh();
-  }
-}, true);
-
-</script>
-
-
-</body></html>
+  if (e.key !=
