@@ -1139,11 +1139,6 @@ function sortItemsInPlace() {
     if (!aBlank && bBlank) return -1;
     if (aBlank && bBlank) return 0;
 
-    const aIncomplete = !!na.descrizione && (!na.codice || !na.peso);
-    const bIncomplete = !!nb.descrizione && (!nb.codice || !nb.peso);
-    if (aIncomplete && !bIncomplete) return 1;
-    if (!aIncomplete && bIncomplete) return -1;
-
     const ad = itemSortKey(na);
     const bd = itemSortKey(nb);
     if (ad < bd) return -1;
@@ -1212,36 +1207,9 @@ function applyDatiSearchFilter() {
 function persistItemsAndRefresh() {
   sortItemsInPlace();
   saveItemsToStorage();
-  buildDatiRows();
-  applyDatiSearchFilter();
-}
-
-
-function persistItemsAndRefreshFromDatiTable() {
-  const tableItems = readItemsFromDatiTable().map(normalizeItem);
-  const hasData = tableItems.some(it => it.descrizione || it.codice || it.peso);
-  if (!hasData) return;
-
-  items.length = 0;
-  tableItems.forEach(it => items.push(it));
-
-  while (items.length < MAX_ITEMS) {
-    items.push({ descrizione: '', codice: '', peso: '' });
-  }
-
-  if (items.length > MAX_ITEMS) {
-    items.length = MAX_ITEMS;
-  }
-
   sortItemsInPlace();
-  saveItemsToStorage();
-  buildDatiRows();
-  updateDatiCountLabel();
+buildDatiRows();
   applyDatiSearchFilter();
-
-  document.querySelectorAll('#requestRows tr').forEach(tr => {
-    if (typeof updateRow === 'function') updateRow(tr.dataset.row);
-  });
 }
 
 
@@ -18925,100 +18893,6 @@ function buildRequestRows() {
 
 
 
-
-function updateDatiCountLabel() {
-  const label = document.querySelector('#panel-dati .dati-tools .muted');
-  if (!label) return;
-  const count = items.filter(it => {
-    const x = normalizeItem(it);
-    return x.descrizione || x.codice || x.peso;
-  }).length;
-  label.textContent = '- articoli caricati: ' + count + ' / ' + MAX_ITEMS + ' posti disponibili';
-}
-
-
-function saveDatiDomRowAllowIncomplete(rowEl) {
-  if (!rowEl) return null;
-
-  const descInput = rowEl.querySelector('input[data-field="descrizione"]');
-  const codeInput = rowEl.querySelector('input[data-field="codice"]');
-  const pesoInput = rowEl.querySelector('input[data-field="peso"]');
-
-  if (!descInput) return null;
-
-  const descrizione = String(descInput.value || '').trim();
-  const codice = codeInput ? String(codeInput.value || '').trim() : '';
-  const peso = pesoInput ? String(pesoInput.value || '').trim() : '';
-
-  // Registra anche se codice e peso sono vuoti: basta la descrizione.
-  if (!descrizione && !codice && !peso) return null;
-
-  const oldIndex = Number(rowEl.getAttribute('data-index'));
-  let targetIndex = Number.isFinite(oldIndex) ? oldIndex : -1;
-
-  const sameDescIndex = items.findIndex(function (it) {
-    return normalizeText(it && it.descrizione) === normalizeText(descrizione);
-  });
-
-  if (sameDescIndex >= 0) {
-    targetIndex = sameDescIndex;
-  } else if (targetIndex < 0) {
-    targetIndex = items.findIndex(function (it) {
-      const x = normalizeItem(it);
-      return !x.descrizione && !x.codice && !x.peso;
-    });
-  }
-
-  if (targetIndex < 0) {
-    targetIndex = items.length;
-  }
-
-  items[targetIndex] = normalizeItem({
-    descrizione: descrizione,
-    codice: codice,
-    peso: peso
-  });
-
-  saveItemsToStorage();
-  return targetIndex;
-}
-
-function finishDatiDomRowAndSort(rowEl) {
-  const savedIndex = saveDatiDomRowAllowIncomplete(rowEl);
-
-  // Ordina solo dopo aver salvato tutta la riga.
-  if (typeof sortItemsAlphabetically === 'function') {
-    sortItemsAlphabetically();
-  } else {
-    items.sort(function(a, b) {
-      return normalizeText((a || {}).descrizione).localeCompare(normalizeText((b || {}).descrizione), 'it');
-    });
-  }
-
-  saveItemsToStorage();
-  buildDatiRows();
-  updateDatiCountLabel();
-
-  const desc = rowEl && rowEl.querySelector('input[data-field="descrizione"]');
-  const key = desc ? normalizeText(desc.value) : '';
-
-  if (key) {
-    setTimeout(function () {
-      const found = Array.from(document.querySelectorAll('#datiBody tr')).find(function (tr) {
-        const d = tr.querySelector('input[data-field="descrizione"]');
-        return d && normalizeText(d.value) === key;
-      });
-      if (found) {
-        found.scrollIntoView({ block: 'center' });
-        const d = found.querySelector('input[data-field="descrizione"]');
-        if (d) d.focus();
-      }
-    }, 0);
-  }
-
-  return savedIndex;
-}
-
 function buildDatiRows() {
   const body = document.getElementById('datiBody');
   if (!body) return;
@@ -19037,7 +18911,9 @@ function buildDatiRows() {
 
     const isCompleteRow = () => {
       const current = items[idx] || { descrizione:'', codice:'', peso:'' };
-      return !!String(current.descrizione || '').trim();
+      return !!String(current.descrizione || '').trim()
+        && !!String(current.codice || '').trim()
+        && !!String(current.peso || '').trim();
     };
 
     const sanitizePeso = (value) => {
@@ -19067,73 +18943,70 @@ function buildDatiRows() {
         input.placeholder = '0,00';
       }
 
-      const commitSameRow = () => {
-        const trCurrent = input.closest('tr');
-        const currentIndex = Number(trCurrent?.dataset.index);
-        if (!Number.isFinite(currentIndex) || !items[currentIndex]) return;
+      input.addEventListener('input', () => {
+        let newValue = input.value;
+        if (field === 'peso') {
+          newValue = sanitizePeso(newValue);
+          if (input.value !== newValue) input.value = newValue;
+        }
+        items[idx][field] = newValue;
+        saveItemsToStorage();
+      });
 
-        const d = trCurrent.querySelector('input[data-field="descrizione"]');
-        const c = trCurrent.querySelector('input[data-field="codice"]');
-        const p = trCurrent.querySelector('input[data-field="peso"]');
-
-        let pesoValue = p ? p.value : '';
-        pesoValue = sanitizePeso(pesoValue);
-        if (p && p.value !== pesoValue) p.value = pesoValue;
-
-        items[currentIndex] = normalizeItem({
-          descrizione: d ? d.value : '',
-          codice: c ? c.value : '',
-          peso: pesoValue
-        });
-
-        if (d) d.setAttribute('value', items[currentIndex].descrizione || '');
-        if (c) c.setAttribute('value', items[currentIndex].codice || '');
-        if (p) p.setAttribute('value', items[currentIndex].peso || '');
-
+      const finalizeEdit = () => {
+        let newValue = input.value;
+        if (field === 'peso') {
+          newValue = sanitizePeso(newValue);
+          if (input.value !== newValue) input.value = newValue;
+        }
+        items[idx][field] = newValue;
         saveItemsToStorage();
       };
 
-      input.addEventListener('input', () => {
-        if (field === 'peso') {
-          const cleaned = sanitizePeso(input.value);
-          if (input.value !== cleaned) input.value = cleaned;
-        }
-        commitSameRow();
-      });
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'Enter') return;
+        ev.preventDefault();
 
-      const focusSameRowField = (nextField) => {
-        const trCurrent = input.closest('tr');
-        const next = trCurrent ? trCurrent.querySelector(`input[data-field="${nextField}"]`) : null;
-        if (next) {
-          next.focus();
-          next.select();
-        }
-      };
-
-      input.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter') return;
-        e.preventDefault();
-        commitSameRow();
+        finalizeEdit();
 
         if (field === 'descrizione') {
-          focusSameRowField('codice');
+          const next = tr.querySelector('input[data-field="codice"]');
+          if (next) next.focus();
           return;
         }
 
         if (field === 'codice') {
-          focusSameRowField('peso');
+          const next = tr.querySelector('input[data-field="peso"]');
+          if (next) next.focus();
           return;
         }
 
         if (field === 'peso') {
-          persistItemsAndRefreshFromDatiTable();
+          const descrizioneInserita = String(items[idx]?.descrizione || '').trim();
+
+          // Anche se codice o peso sono vuoti, registra comunque l'articolo se c'è la descrizione.
+          if (descrizioneInserita) {
+            persistItemsAndRefresh();
+
+            setTimeout(() => {
+              const key = itemSortKey({ descrizione: descrizioneInserita, codice: '', peso: '' });
+              const found = Array.from(document.querySelectorAll('#datiBody tr')).find(rowEl => {
+                const d = rowEl.querySelector('input[data-field="descrizione"]');
+                return d && itemSortKey({ descrizione: d.value, codice: '', peso: '' }) === key;
+              });
+
+              if (found) {
+                found.classList.add('dati-match-row');
+                found.scrollIntoView({ block: 'center' });
+              }
+            }, 30);
+          } else {
+            saveItemsToStorage();
+          }
         }
       });
 
-      input.addEventListener('change', () => {
-        commitSameRow();
-        applyDatiSearchFilter();
-      });
+      input.addEventListener('change', finalizeEdit);
       td.appendChild(input);
       return td;
     };
@@ -19967,40 +19840,6 @@ document.addEventListener('blur', function(e){
     }
   }
 }, true);
-
-
-document.addEventListener('keydown', function (ev) {
-  const input = ev.target;
-  if (!input || !input.matches || !input.matches('#datiBody input[data-field]')) return;
-  if (ev.key !== 'Enter') return;
-
-  const field = input.getAttribute('data-field');
-  const row = input.closest('tr');
-  if (!row) return;
-
-  if (field === 'descrizione') {
-    ev.preventDefault();
-    saveDatiDomRowAllowIncomplete(row);
-    const codice = row.querySelector('input[data-field="codice"]');
-    if (codice) codice.focus();
-    return;
-  }
-
-  if (field === 'codice') {
-    ev.preventDefault();
-    saveDatiDomRowAllowIncomplete(row);
-    const peso = row.querySelector('input[data-field="peso"]');
-    if (peso) peso.focus();
-    return;
-  }
-
-  if (field === 'peso') {
-    ev.preventDefault();
-    finishDatiDomRowAndSort(row);
-    return;
-  }
-}, true);
-
 </script>
 
 </body></html>
