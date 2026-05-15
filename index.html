@@ -19322,15 +19322,7 @@ function buildDatiRows() {
           newValue = sanitizePeso(newValue);
           if (input.value !== newValue) input.value = newValue;
         }
-
-        const currentTr = input.closest('tr');
-        const currentIndex = Number(currentTr ? currentTr.dataset.index : input.dataset.index);
-        const safeIndex = Number.isFinite(currentIndex) ? currentIndex : idx;
-
-        if (items[safeIndex]) {
-          items[safeIndex][field] = newValue;
-        }
-
+        items[idx][field] = newValue;
         saveItemsToStorage();
       });
 
@@ -19340,33 +19332,14 @@ function buildDatiRows() {
           newValue = sanitizePeso(newValue);
           if (input.value !== newValue) input.value = newValue;
         }
-
-        const currentTr = input.closest('tr');
-        const currentIndex = Number(currentTr ? currentTr.dataset.index : input.dataset.index);
-        const safeIndex = Number.isFinite(currentIndex) ? currentIndex : idx;
-
-        if (items[safeIndex]) {
-          items[safeIndex][field] = newValue;
-
-          // Patch minima: se sto salvando il PESO, leggo descrizione/codice/peso
-          // dalla stessa riga visibile. Così il peso resta nella riga dove è stato inserito.
-          if (field === 'peso' && currentTr) {
-            const descInput = currentTr.querySelector('input[data-field="descrizione"]');
-            const codeInput = currentTr.querySelector('input[data-field="codice"]');
-            if (descInput) items[safeIndex].descrizione = String(descInput.value || '').trim();
-            if (codeInput) items[safeIndex].codice = String(codeInput.value || '').trim();
-            items[safeIndex].peso = newValue;
-          }
-        }
-
+        items[idx][field] = newValue;
         saveItemsToStorage();
       };
 
       const focusSameRowField = (nextField) => {
-        const currentTr = input.closest('tr');
-        const next = currentTr
-          ? currentTr.querySelector(`input[data-field="${nextField}"]`)
-          : document.querySelector(`#datiBody input[data-index="${idx}"][data-field="${nextField}"]`);
+        const next = document.querySelector(
+          `#datiBody input[data-index="${idx}"][data-field="${nextField}"]`
+        );
         if (next) {
           next.focus();
           next.select();
@@ -19842,4 +19815,504 @@ async function exportExcelAdvanced() {
     const a = document.createElement('a');
     a.href = url;
     a.download = safeName + '.xlsx';
-    document.b
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } catch (e) {
+    console.error(e);
+    alert("Errore durante l'export Excel definitivo");
+  }
+}
+function newForm() {
+  resetForm();
+}
+
+function clearDraftAndReset() {
+  if (!confirm('Vuoi azzerare modulo e bozza salvata nel browser?')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  document.querySelectorAll('#requestRows input, #requestRows textarea').forEach(el => el.value = '');
+  ['f2','k3','k4','o5','o6','annotazioni','nomeRichiedente','firmaRichiedente'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  updateFooterTotals();
+  setTodayFields();
+  syncFooterLocationLabels();
+}
+
+function generateCompiledHTML() {
+  try {
+    saveState();
+
+    const state = localStorage.getItem(STORAGE_KEY);
+    if (!state) {
+      alert('Nessun dato da esportare');
+      return;
+    }
+
+
+    document.querySelectorAll('#datiBody tr').forEach(tr => {
+      const idx = Number(tr.dataset.index);
+      const it = normalizeItem(items[idx] || {});
+      const d = tr.querySelector('input[data-field="descrizione"]');
+      const c = tr.querySelector('input[data-field="codice"]');
+      const p = tr.querySelector('input[data-field="peso"]');
+      if (d) d.setAttribute('value', it.descrizione || '');
+      if (c) c.setAttribute('value', it.codice || '');
+      if (p) p.setAttribute('value', it.peso || '');
+    });
+
+    let exported = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+
+ // NON incorporare localStorage nell'HTML esportato
+exported = exported.replace(/<script>\s*EMBEDDED_STATE[\s\S]*?<\/script>/, '');
+
+    const blob = new Blob([exported], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    const orderNo = (document.getElementById('f2')?.value || 'modulo').trim().replace(/[^a-zA-Z0-9_-]+/g, '_');
+    a.href = url;
+    a.download = 'richiesta_compilata_' + orderNo + '.html';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  } catch (e) {
+    console.error(e);
+    alert('Errore durante la generazione');
+  }
+}
+
+
+function markEmptyRows() {
+  document.querySelectorAll('#requestRows tr').forEach(tr => {
+    const qty  = tr.querySelector('.qty')?.value.trim();
+    const desc = tr.querySelector('.desc')?.value.trim();
+    const code = tr.querySelector('.code')?.value.trim();
+    const note = tr.querySelector('.note')?.value.trim();
+
+    if (!qty && !desc && !code && !note) {
+      tr.classList.add('empty-row');
+    } else {
+      tr.classList.remove('empty-row');
+    }
+  });
+}
+
+function printClean() {
+  markEmptyRows();
+  window.print();
+
+  setTimeout(() => {
+    document.querySelectorAll('.empty-row').forEach(tr => {
+      tr.classList.remove('empty-row');
+    });
+  }, 500);
+}
+
+function saveState() {
+  const state = {
+    header: {
+      f2: document.getElementById('f2').value,
+      k3: document.getElementById('k3').value,
+      k4: document.getElementById('k4').value,
+      o5: document.getElementById('o5').value,
+      o6: document.getElementById('o6').value,
+      annotazioni: document.getElementById('annotazioni').value,
+      nomeRichiedente: document.getElementById('nomeRichiedente').value,
+      firmaRichiedente: document.getElementById('firmaRichiedente').value
+    },
+    rows: [...document.querySelectorAll('#requestRows tr')].map(tr => {
+      const get = cls => tr.querySelector('.'+cls).value;
+      return {
+        qty:get('qty'), desc:get('desc'), code:get('code'), peso:get('peso'),
+        magM:get('magM'), magN:get('magN'), magO:get('magO'), magP:get('magP'),
+        diff:get('diff'), note:get('note')
+      };
+    }),
+    items
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function loadState() {
+  let raw = localStorage.getItem(STORAGE_KEY);
+
+  if (!raw && EMBEDDED_STATE) {
+    raw = EMBEDDED_STATE;
+  }
+
+  if (!raw) return;
+  try {
+    const state = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (state.header) {
+      for (const [id,val] of Object.entries(state.header)) {
+        const el = document.getElementById(id);
+        if (el) el.value = val ?? '';
+      }
+    }
+    if (Array.isArray(state.items)) {
+      state.items.forEach((it, idx) => {
+        if (idx < items.length) items[idx] = it;
+      });
+    }
+    if (Array.isArray(state.rows)) {
+      state.rows.forEach((row, idx) => {
+        const tr = document.querySelectorAll('#requestRows tr')[idx];
+        if (!tr) return;
+        for (const [k,v] of Object.entries(row)) {
+          const el = tr.querySelector('.'+k);
+          if (el) el.value = v ?? '';
+        }
+      });
+    }
+  } catch (e) {
+    console.warn('Errore caricamento stato', e);
+  }
+  document.querySelectorAll('#requestRows tr').forEach(tr => updateRow(tr.dataset.row));
+  updateFooterTotals();
+  syncFooterLocationLabels();
+}
+
+
+
+function snapshotRequestRows() {
+  return [...document.querySelectorAll('#requestRows tr')].map(tr => {
+    const pick = cls => tr.querySelector('.' + cls)?.value || '';
+    return {
+      qty: pick('qty'),
+      desc: pick('desc'),
+      code: pick('code'),
+      peso: pick('peso'),
+      magM: pick('magM'),
+      magN: pick('magN'),
+      magO: pick('magO'),
+      magP: pick('magP'),
+      diff: pick('diff'),
+      note: pick('note')
+    };
+  });
+}
+
+function restoreRequestRows(snapshot) {
+  if (!Array.isArray(snapshot)) return;
+  const rows = document.querySelectorAll('#requestRows tr');
+  snapshot.forEach((row, idx) => {
+    const tr = rows[idx];
+    if (!tr) return;
+    Object.entries(row).forEach(([k, v]) => {
+      const el = tr.querySelector('.' + k);
+      if (el) el.value = v ?? '';
+    });
+  });
+}
+
+function rebuildRequestRowsPreserve() {
+  const snapshot = snapshotRequestRows();
+  buildRequestRows();
+  restoreRequestRows(snapshot);
+  bindRowEventsOnly();
+  document.querySelectorAll('#requestRows tr').forEach(tr => updateRow(tr.dataset.row));
+  updateFooterTotals();
+}
+
+function bindRowEventsOnly() {
+  document.querySelectorAll('.qty,.magM,.magN,.magO,.magP').forEach(el => {
+    if (el.dataset.boundQty === '1') return;
+    el.dataset.boundQty = '1';
+    el.addEventListener('input', () => updateRow(el.dataset.row));
+  });
+  document.querySelectorAll('.desc').forEach(el => {
+    if (el.dataset.boundDesc === '1') return;
+    el.dataset.boundDesc = '1';
+    attachAutocomplete(el);
+  });
+  document.querySelectorAll('#requestRows .note').forEach(el => {
+    if (el.dataset.boundNote === '1') return;
+    el.dataset.boundNote = '1';
+    el.addEventListener('input', saveStateDebounced);
+  });
+}
+
+function resetForm() {
+  if (!confirm('Vuoi iniziare un nuovo modulo?')) return;
+  document.querySelectorAll('#requestRows input, #requestRows textarea').forEach(el => el.value = '');
+  ['f2','k3','k4','o5','o6','annotazioni','nomeRichiedente','firmaRichiedente'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  updateFooterTotals();
+  setTodayFields();
+  syncFooterLocationLabels();
+}
+function syncFooterLocationLabels() {
+  const a = document.getElementById('o5')?.value || '';
+  const b = document.getElementById('o6')?.value || '';
+  const fo = document.getElementById('footerPosO');
+  const fp = document.getElementById('footerPosP');
+  if (fo) {
+    fo.value = a;
+    fo.setAttribute('readonly', 'readonly');
+  }
+  if (fp) {
+    fp.value = b;
+    fp.setAttribute('readonly', 'readonly');
+  }
+}
+
+
+function bindEvents() {
+  bindRowEventsOnly();
+
+  ['f2','k3','k4','o5','o6','annotazioni','nomeRichiedente','firmaRichiedente'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el.dataset.boundMain) {
+      el.dataset.boundMain = '1';
+      el.addEventListener('input', saveStateDebounced);
+    }
+  });
+
+  const search = document.getElementById('searchDati');
+  if (search && !search.dataset.boundSearch) {
+    search.dataset.boundSearch = '1';
+    search.addEventListener('input', applyDatiSearchFilter);
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        applyDatiSearchFilter();
+      }
+    });
+  }
+
+  document.querySelectorAll('.tab').forEach(tab => {
+    if (tab.dataset.boundTab) return;
+    tab.dataset.boundTab = '1';
+    tab.addEventListener('click', () => {
+      const name = tab.dataset.tab;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      const panel = document.getElementById('panel-' + name);
+      if (panel) panel.classList.add('active');
+      if (name === 'dati') applyDatiSearchFilter();
+    });
+  });
+}
+
+let saveTimer = null;
+function saveStateDebounced() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveState, 500);
+}
+buildRequestRows();
+// All'avvio fonde SEMPRE gli articoli presenti nella tabella DATI HTML dentro il database usato dalla RICHIESTA.
+try {
+  localStorage.removeItem('richiestaAttrezzatureItems');
+  localStorage.removeItem('items');
+  localStorage.removeItem('dati');
+} catch(e) {}
+
+mergeEmbeddedDatiIntoItems();
+console.log('Articoli disponibili per RICHIESTA:', getAllArticlesForRichiesta().length);
+buildDatiRows();
+document.querySelectorAll('#requestRows tr').forEach(tr => {
+  if (typeof updateRow === 'function') updateRow(tr.dataset.row);
+});
+setTodayFields();
+loadState();
+
+syncFooterLocationLabels();
+bindEvents();
+
+['o5','o6'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el && !el.dataset.syncBound) {
+    el.dataset.syncBound = '1';
+    el.addEventListener('input', () => {
+      syncFooterLocationLabels();
+      saveStateDebounced();
+    });
+  }
+});
+
+
+document.getElementById('addRowsBtn').addEventListener('click', () => {
+  requestRowCount += 1;
+  rebuildRequestRowsPreserve();
+  saveStateDebounced();
+});
+
+document.getElementById('removeRowsBtn').addEventListener('click', () => {
+  if (requestRowCount <= 1) return;
+  const rows = [...document.querySelectorAll('#requestRows tr')];
+  const last = rows[rows.length - 1];
+  const hasData = last && [...last.querySelectorAll('input, textarea')].some(el => (el.value || '').trim() !== '');
+  if (hasData && !confirm("L'ultima riga contiene dati. Vuoi eliminarla?")) return;
+  requestRowCount -= 1;
+  rebuildRequestRowsPreserve();
+  saveStateDebounced();
+});
+
+document.getElementById('footerPosO').addEventListener('input', () => syncFooterLocationLabels('bottom'));
+document.getElementById('footerPosP').addEventListener('input', () => syncFooterLocationLabels('bottom'));
+document.getElementById('o5').addEventListener('input', () => syncFooterLocationLabels('top'));
+document.getElementById('o6').addEventListener('input', () => syncFooterLocationLabels('top'));
+document.querySelectorAll('#requestRows tr').forEach(tr => updateRow(tr.dataset.row));
+</script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script>
+window.addEventListener('beforeunload', () => {
+  try {
+    saveItemsToStorage();
+    saveState();
+  } catch (e) {}
+});
+</script>
+<script>
+(function () {
+  let deferredPrompt = null;
+  const installBtn = document.getElementById('installAppBtn');
+  if (!installBtn) return;
+
+  function isStandalone() {
+    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  }
+
+  function setButton(text, disabled, color) {
+    installBtn.textContent = text;
+    installBtn.disabled = !!disabled;
+    installBtn.style.display = 'inline-block';
+    installBtn.style.background = color || '#0d6efd';
+    installBtn.style.color = '#fff';
+    installBtn.style.borderColor = color || '#0d6efd';
+  }
+
+  if (isStandalone()) {
+    setButton('✅ App già installata', true, '#198754');
+    return;
+  }
+
+  setButton('📲 Installa app', false, '#0d6efd');
+
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();
+    deferredPrompt = e;
+    setButton('📲 Installa app', false, '#198754');
+  });
+
+  installBtn.addEventListener('click', async function () {
+    if (!deferredPrompt) {
+      alert('Installazione non ancora disponibile. Apri il sito da Chrome/Edge tramite link GitHub, verifica manifest.webmanifest, sw.js e icone, poi fai CTRL+SHIFT+R.');
+      return;
+    }
+
+    installBtn.disabled = true;
+    try {
+      deferredPrompt.prompt();
+      await deferredPrompt.userChoice;
+    } catch (err) {
+      console.log('Installazione non riuscita:', err);
+    } finally {
+      deferredPrompt = null;
+      setButton('📲 Installa app', false, '#0d6efd');
+    }
+  });
+
+  window.addEventListener('appinstalled', function () {
+    deferredPrompt = null;
+    setButton('✅ App installata', true, '#198754');
+  });
+})();
+</script>
+<script>
+document.addEventListener('blur', function(e){
+  const el = e.target;
+  if(el && el.dataset && el.dataset.field === 'peso'){
+    let v = (el.value || '').toString().trim().replace(',', '.');
+    if(v !== '' && !isNaN(v)){
+      el.value = Number(v).toFixed(2).replace('.', ',');
+    }
+  }
+}, true);
+
+
+document.addEventListener('DOMContentLoaded', function () {
+  rebuildItemsFromDatiAndItems();
+
+  document.querySelectorAll('.tab[data-tab="richiesta"]').forEach(tab => {
+    tab.addEventListener('click', function () {
+      rebuildItemsFromDatiAndItems();
+    });
+  });
+
+  document.querySelectorAll('#requestRows .desc').forEach(el => {
+    el.addEventListener('focus', function () {
+      rebuildItemsFromDatiAndItems();
+    });
+    el.addEventListener('input', function () {
+      rebuildItemsFromDatiAndItems();
+    });
+  });
+});
+
+
+
+document.addEventListener('DOMContentLoaded', function () {
+  syncAllArticlesBeforeRender();
+  buildDatiRows();
+  updateDatiCountLabel();
+});
+
+
+
+// PATCH MINIMA PESO DATI: mantiene il peso nella stessa riga visibile.
+// Non modifica tab, ordinamento, articoli, richiesta o PWA.
+document.addEventListener('keydown', function(e) {
+  const input = e.target;
+  if (!input || !input.matches || !input.matches('#datiBody input[data-field="peso"]')) return;
+  if (e.key !== 'Enter') return;
+
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+
+  const tr = input.closest('tr');
+  if (!tr) return;
+
+  const idx = Number(tr.dataset.index);
+  if (!Number.isFinite(idx) || !items[idx]) return;
+
+  const descInput = tr.querySelector('input[data-field="descrizione"]');
+  const codeInput = tr.querySelector('input[data-field="codice"]');
+  const pesoInput = tr.querySelector('input[data-field="peso"]');
+
+  let peso = pesoInput ? String(pesoInput.value || '') : '';
+  peso = peso.replace(/\./g, ',').replace(/[^0-9,]/g, '');
+  const parts = peso.split(',');
+  if (parts.length > 2) peso = parts[0] + ',' + parts.slice(1).join('');
+  const finalParts = peso.split(',');
+  if (finalParts[1] !== undefined) {
+    finalParts[1] = finalParts[1].slice(0, 2);
+    peso = finalParts[0] + ',' + finalParts[1];
+  }
+  if (pesoInput) pesoInput.value = peso;
+
+  items[idx] = normalizeItem({
+    descrizione: descInput ? descInput.value : items[idx].descrizione,
+    codice: codeInput ? codeInput.value : items[idx].codice,
+    peso: peso
+  });
+
+  saveItemsToStorage();
+
+  if (typeof persistItemsAndRefresh === 'function') {
+    persistItemsAndRefresh();
+  }
+}, true);
+
+</script>
+
+</body></html>
