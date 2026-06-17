@@ -19090,6 +19090,7 @@ function mergeEmbeddedDatiIntoItems() {
 
   sortItemsInPlace();
   saveItemsToStorage();
+  invalidateRichiestaArticlesCache();
 }
 
 function getAllArticlesForRichiesta() {
@@ -19184,24 +19185,39 @@ function rebuildItemsFromDatiAndItems() {
   saveItemsToStorage();
 }
 
+let richiestaArticlesCache = null;
+let richiestaArticlesByDesc = null;
+
+function invalidateRichiestaArticlesCache() {
+  richiestaArticlesCache = null;
+  richiestaArticlesByDesc = null;
+}
+
+function getRichiestaArticlesCached() {
+  if (richiestaArticlesCache && richiestaArticlesByDesc) return richiestaArticlesCache;
+  const list = getArticlesForRichiestaFromEverywhere();
+  richiestaArticlesCache = list;
+  richiestaArticlesByDesc = new Map();
+  list.forEach(item => {
+    const key = normSearchText(item.descrizione);
+    if (key && !richiestaArticlesByDesc.has(key)) richiestaArticlesByDesc.set(key, item);
+  });
+  return richiestaArticlesCache;
+}
+
 function matchItems(query) {
-  syncAllArticlesBeforeRender();
   const q = normSearchText(query);
   if (!q) return [];
 
-  return getArticlesForRichiestaFromEverywhere()
+  return getRichiestaArticlesCached()
     .filter(item => {
       const d = normSearchText(item.descrizione);
       return d.startsWith(q) || d.includes(q);
     })
     .slice(0, 100);
 }
-function buildRequestRows() {
-  const tbody = document.getElementById('requestRows');
-  let html = '';
-  for (let i=0; i<requestRowCount; i++) {
-    const rowNo = i + 7;
-    html += `
+function requestRowHtml(rowNo) {
+  return `
       <tr data-row="${rowNo}">
         <td class="white"><input class="row-input center qty" data-row="${rowNo}" type="number" min="0" step="1"></td>
         <td class="white suggest-wrap" colspan="8">
@@ -19217,8 +19233,31 @@ function buildRequestRows() {
         <td class="white"><input class="row-input center diff" data-row="${rowNo}" readonly></td>
         <td class="white"><textarea class="row-input note resizable-field" data-row="${rowNo}"></textarea></td>
       </tr>`;
+}
+
+function buildRequestRows() {
+  const tbody = document.getElementById('requestRows');
+  let html = '';
+  for (let i=0; i<requestRowCount; i++) {
+    html += requestRowHtml(i + 7);
   }
   tbody.innerHTML = html;
+}
+
+function appendRequestRow() {
+  const tbody = document.getElementById('requestRows');
+  if (!tbody) return;
+  const rowNo = requestRowCount + 6;
+  tbody.insertAdjacentHTML('beforeend', requestRowHtml(rowNo));
+  bindRowEventsOnly(tbody.lastElementChild);
+  updateFooterTotals();
+}
+
+function removeLastRequestRow() {
+  const tbody = document.getElementById('requestRows');
+  if (!tbody || !tbody.lastElementChild) return;
+  tbody.lastElementChild.remove();
+  updateFooterTotals();
 }
 
 
@@ -19300,6 +19339,7 @@ function syncAllArticlesBeforeRender() {
   }
 
   saveItemsToStorage();
+  invalidateRichiestaArticlesCache();
   return all.length;
 }
 
@@ -19374,6 +19414,7 @@ function buildDatiRows() {
           if (input.value !== newValue) input.value = newValue;
         }
         items[idx][field] = newValue;
+        invalidateRichiestaArticlesCache();
         saveItemsToStorage();
       });
 
@@ -19384,6 +19425,7 @@ function buildDatiRows() {
           if (input.value !== newValue) input.value = newValue;
         }
         items[idx][field] = newValue;
+        invalidateRichiestaArticlesCache();
         saveItemsToStorage();
       };
 
@@ -19459,21 +19501,20 @@ function syncFooterLocationLabels(source='top') {
 }
 
 function findItemByDescription(desc) {
-  syncAllArticlesBeforeRender();
   const q = normSearchText(desc);
   if (!q) return null;
 
-  const all = getArticlesForRichiestaFromEverywhere();
-
+  const all = getRichiestaArticlesCached();
   return (
-    all.find(item => normSearchText(item.descrizione) === q) ||
+    richiestaArticlesByDesc.get(q) ||
     all.find(item => normSearchText(item.descrizione).startsWith(q)) ||
     all.find(item => normSearchText(item.descrizione).includes(q)) ||
     null
   );
 }
-function updateRow(rowNo) {
+function updateRow(rowNo, skipFooter=false) {
   const row = document.querySelector(`tr[data-row="${rowNo}"]`);
+  if (!row) return;
   const qty = num(row.querySelector('.qty').value);
   const desc = row.querySelector('.desc').value.trim();
   const item = findItemByDescription(desc);
@@ -19485,7 +19526,7 @@ function updateRow(rowNo) {
   const p = num(row.querySelector('.magP').value);
   const diff = qty ? (-qty + m + n + o + p) : 0;
   row.querySelector('.diff').value = qty ? diff : '';
-  updateFooterTotals();
+  if (!skipFooter) updateFooterTotals();
 }
 function updateFooterTotals() {
   // Totali automatici: somma quantità per colonna magazzino
@@ -19587,9 +19628,13 @@ function attachAutocomplete(input) {
     itemsEls.forEach((el, idx) => el.classList.toggle('active', idx === activeIndex));
     itemsEls[activeIndex]?.scrollIntoView({block:'nearest'});
   });
-  document.addEventListener('click', (e) => {
-    if (!box.contains(e.target) && e.target !== input) box.style.display = 'none';
-  });
+  if (!document.__requestSuggestCloseBound) {
+    document.__requestSuggestCloseBound = true;
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('.suggest-wrap')) return;
+      document.querySelectorAll('.suggest-box').forEach(b => b.style.display = 'none');
+    });
+  }
 }
 
 
@@ -20023,7 +20068,7 @@ function loadState() {
   } catch (e) {
     console.warn('Errore caricamento stato', e);
   }
-  document.querySelectorAll('#requestRows tr').forEach(tr => updateRow(tr.dataset.row));
+  document.querySelectorAll('#requestRows tr').forEach(tr => updateRow(tr.dataset.row, true));
   updateFooterTotals();
   syncFooterLocationLabels();
 }
@@ -20066,22 +20111,22 @@ function rebuildRequestRowsPreserve() {
   buildRequestRows();
   restoreRequestRows(snapshot);
   bindRowEventsOnly();
-  document.querySelectorAll('#requestRows tr').forEach(tr => updateRow(tr.dataset.row));
+  document.querySelectorAll('#requestRows tr').forEach(tr => updateRow(tr.dataset.row, true));
   updateFooterTotals();
 }
 
-function bindRowEventsOnly() {
-  document.querySelectorAll('.qty,.magM,.magN,.magO,.magP').forEach(el => {
+function bindRowEventsOnly(scope=document) {
+  scope.querySelectorAll('.qty,.magM,.magN,.magO,.magP').forEach(el => {
     if (el.dataset.boundQty === '1') return;
     el.dataset.boundQty = '1';
     el.addEventListener('input', () => updateRow(el.dataset.row));
   });
-  document.querySelectorAll('.desc').forEach(el => {
+  scope.querySelectorAll('.desc').forEach(el => {
     if (el.dataset.boundDesc === '1') return;
     el.dataset.boundDesc = '1';
     attachAutocomplete(el);
   });
-  document.querySelectorAll('#requestRows .note').forEach(el => {
+  scope.querySelectorAll('#requestRows .note, .note').forEach(el => {
     if (el.dataset.boundNote === '1') return;
     el.dataset.boundNote = '1';
     el.addEventListener('input', saveStateDebounced);
@@ -20170,8 +20215,9 @@ mergeEmbeddedDatiIntoItems();
 console.log('Articoli disponibili per RICHIESTA:', getAllArticlesForRichiesta().length);
 buildDatiRows();
 document.querySelectorAll('#requestRows tr').forEach(tr => {
-  if (typeof updateRow === 'function') updateRow(tr.dataset.row);
+  if (typeof updateRow === 'function') updateRow(tr.dataset.row, true);
 });
+updateFooterTotals();
 setTodayFields();
 loadState();
 
@@ -20192,7 +20238,7 @@ bindEvents();
 
 document.getElementById('addRowsBtn').addEventListener('click', () => {
   requestRowCount += 1;
-  rebuildRequestRowsPreserve();
+  appendRequestRow();
   saveStateDebounced();
 });
 
@@ -20203,7 +20249,7 @@ document.getElementById('removeRowsBtn').addEventListener('click', () => {
   const hasData = last && [...last.querySelectorAll('input, textarea')].some(el => (el.value || '').trim() !== '');
   if (hasData && !confirm("L'ultima riga contiene dati. Vuoi eliminarla?")) return;
   requestRowCount -= 1;
-  rebuildRequestRowsPreserve();
+  removeLastRequestRow();
   saveStateDebounced();
 });
 
@@ -20211,7 +20257,8 @@ document.getElementById('footerPosO').addEventListener('input', () => syncFooter
 document.getElementById('footerPosP').addEventListener('input', () => syncFooterLocationLabels('bottom'));
 document.getElementById('o5').addEventListener('input', () => syncFooterLocationLabels('top'));
 document.getElementById('o6').addEventListener('input', () => syncFooterLocationLabels('top'));
-document.querySelectorAll('#requestRows tr').forEach(tr => updateRow(tr.dataset.row));
+document.querySelectorAll('#requestRows tr').forEach(tr => updateRow(tr.dataset.row, true));
+updateFooterTotals();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script>
@@ -20324,4 +20371,47 @@ document.addEventListener('DOMContentLoaded', function () {
 document.addEventListener('keydown', function(e) {
   const input = e.target;
   if (!input || !input.matches || !input.matches('#datiBody input[data-field="peso"]')) return;
-  if (e.key !=
+  if (e.key !== 'Enter') return;
+
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+
+  const tr = input.closest('tr');
+  if (!tr) return;
+
+  const idx = Number(tr.dataset.index);
+  if (!Number.isFinite(idx) || !items[idx]) return;
+
+  const descInput = tr.querySelector('input[data-field="descrizione"]');
+  const codeInput = tr.querySelector('input[data-field="codice"]');
+  const pesoInput = tr.querySelector('input[data-field="peso"]');
+
+  let peso = pesoInput ? String(pesoInput.value || '') : '';
+  peso = peso.replace(/\./g, ',').replace(/[^0-9,]/g, '');
+  const parts = peso.split(',');
+  if (parts.length > 2) peso = parts[0] + ',' + parts.slice(1).join('');
+  const finalParts = peso.split(',');
+  if (finalParts[1] !== undefined) {
+    finalParts[1] = finalParts[1].slice(0, 2);
+    peso = finalParts[0] + ',' + finalParts[1];
+  }
+  if (pesoInput) pesoInput.value = peso;
+
+  items[idx] = normalizeItem({
+    descrizione: descInput ? descInput.value : items[idx].descrizione,
+    codice: codeInput ? codeInput.value : items[idx].codice,
+    peso: peso
+  });
+
+  saveItemsToStorage();
+
+  if (typeof persistItemsAndRefresh === 'function') {
+    persistItemsAndRefresh();
+  }
+}, true);
+
+</script>
+
+
+</body></html>
